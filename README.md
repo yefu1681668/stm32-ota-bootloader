@@ -13,6 +13,7 @@
 - ✅ **UART 错误标志自愈**：轮询接收前清 ORE/NE/FE/PE，杜绝"传一半突然静默"
 - ✅ **七步安全跳转**：关中断 → 清 NVIC → 时钟复位 → HAL DeInit → 停 SysTick → 设 MSP → 跳 PC
 - ✅ **APP 侧自检**：`SCB->VTOR` 重定位 + `__enable_irq()`，双保险
+- ✅ **boot_try 失败保护（已实测）**：参数区 state 由 `PENDING → VALID → APP_OK` 流转；APP 稳定运行 2s 后自回写 `APP_OK` 并清零 try_count。若 APP 连续 3 次起不来，Boot 自动停在升级模式等待重刷，单分区也能防变砖
 
 ## Flash 分区
 
@@ -20,7 +21,7 @@
 |---|---|---|---|
 | Boot | `0x08000000` | 16KB (`0x4000`) | Bootloader，含升级协议与搬移逻辑 |
 | APP | `0x08004000` | 47KB (`0xBC00`) | 应用程序 |
-| 参数区 | `0x0800FC00` | 1KB | OTA 标记（magic/state/size/crc） |
+| 参数区 | `0x0800FC00` | 1KB | OTA 参数（magic / state / size / crc / try_count，共 20 字节） |
 
 ## 升级流程
 
@@ -97,10 +98,11 @@ W25Q ID = EF4014
 
 ## Roadmap
 
-- [x] 阶段一：串口 IAP + W25Q 暂存 + 双分区跳转（当前）
+- [x] 阶段一：串口 IAP + W25Q 暂存 + 双分区跳转（已真机跑通）
+- [x] boot_try 失败保护：APP 连续 3 次未确认则停在 Boot 等重升（已实测）
+- [x] 压力测试：5 轮连续串口升级 + 升级中途断电验证（不变砖）
 - [ ] 阶段二：CAN 双板互通（SN65HVD230，500kbps，传输抽象层替换）
 - [ ] 阶段三：LoRa 远程升级（E22-470T22S，470MHz UART 透传）
-- [ ] boot_try 失败保护：APP 连续 3 次未确认则停在 Boot 等重升
 
 ## 已知现象
 

@@ -16,6 +16,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <string.h>
+#include "ota_param.h"   /* 参数区结构（与 Boot 共用）：APP 自确认要回写 state/try_count */
+#include "flash_if.h"    /* 内部 Flash 擦写：把“APP 已存活”写回参数区 */
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -27,7 +30,7 @@ static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 
 /* USER CODE BEGIN 0 */
-
+void ota_app_confirm(void);   /* 前向声明：函数体在文件末尾 USER CODE BEGIN 4 处 */
 /* USER CODE END 0 */
 
 /**
@@ -68,6 +71,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint8_t confirmed = 0;                         /* 自确认只做一次 */
   while (1)
   {
     /* USER CODE END WHILE */
@@ -75,6 +79,15 @@ int main(void)
     /* USER CODE BEGIN 3 */
     HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);      /* PC13 LED 翻转（核心板低电平点亮） */
     printf("[APP] alive, tick=%lu\r\n", (unsigned long)HAL_GetTick());
+
+    /* 跑稳 2 秒后再自确认：此时中断/SysTick/GPIO 都正常 -> 证明 APP 真的活了 */
+    if (!confirmed && HAL_GetTick() > 2000)
+    {
+        ota_app_confirm();
+        confirmed = 1;
+        printf("[APP] confirmed alive -> state=APP_OK\r\n");
+    }
+
     HAL_Delay(500);                              /* 500ms 闪一次 = 心跳 */
   }
   /* USER CODE END 3 */
@@ -161,6 +174,26 @@ int fputc(int ch, FILE *f)
     (void)f;
     HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
     return ch;
+}
+
+/* ---------- APP 自确认：回写“我已存活” ----------
+   Boot 跳转 APP 前会累加 try_count；只有当 APP 真正跑起来（中断开、SysTick 走、
+   GPIO 可控）并主动回写 state=APP_OK + try_count=0，Boot 才认为这次升级成功。
+   若 APP 起不来（卡死/跑飞），不会执行这函数 -> 下次 Boot 累加 try_count，
+   连续 3 次后停 Boot 进升级模式等重刷。这就是单分区下的“失败保护”。 */
+void ota_app_confirm(void)
+{
+    ota_param_t p;
+    memcpy(&p, (const void *)PARAM_START, sizeof(ota_param_t));
+    if (p.magic != OTA_MAGIC) return;          /* 没有 Boot 写的参数区，跳过 */
+    if (p.state == OTA_STATE_APP_OK) return;   /* 已经确认过，不重复擦写 Flash */
+
+    p.state = OTA_STATE_APP_OK;
+    p.try_count = 0;
+    FLASH_If_Init();
+    FLASH_If_Erase(PARAM_START, PARAM_START + sizeof(ota_param_t));
+    FLASH_If_Write(PARAM_START, (const uint8_t *)&p, sizeof(ota_param_t));
+    FLASH_If_Lock();
 }
 /* USER CODE END 4 */
 

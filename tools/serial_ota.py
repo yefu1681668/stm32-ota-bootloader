@@ -105,11 +105,15 @@ def try_once(ser, size, crc, data):
     if b"VERIFIED OK" in out:
         print("BOOT:", out.decode(errors="ignore").strip())
         print("校验通过！等待 Boot 搬移固件并跳转 APP……")
-        time.sleep(1.5)
-        tail = ser.read(500).decode(errors="ignore")
+        time.sleep(2.0)
+        tail = ser.read(800).decode(errors="ignore")
         if tail.strip():
             print(tail.strip())
-        return True
+        merged = out.decode(errors="ignore") + tail
+        if ("jump to APP" in merged) or ("running" in merged):
+            return True
+        print("WARN: 校验通过但没检测到 APP 启动（没看到 jump to APP / running），可能搬移或跳转失败。")
+        return False
 
     out += ser.read(200)
     print("BOOT:", out.decode(errors="ignore").strip())

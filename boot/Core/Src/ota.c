@@ -8,13 +8,7 @@
 
 extern UART_HandleTypeDef huart1;   /* main.c 里的串口句柄 */
 
-/* ============ 参数区结构体（存于最后一页 1KB）============ */
-typedef struct {
-    uint32_t magic;   /* OTA_MAGIC */
-    uint32_t state;   /* OTA_STATE_* */
-    uint32_t size;    /* 固件字节数 */
-    uint32_t crc;     /* 固件 CRC32 */
-} ota_param_t;        /* 共 16 字节，远小于 1KB 页 */
+/* ============ 参数区结构体见 ota_param.h（Boot/APP 共用 20 字节）============ */
 
 /* ---------- 参数读写（直接映射 Flash 地址）---------- */
 static void param_read(ota_param_t *p)
@@ -255,14 +249,31 @@ static void enter_upgrade(void)
             if (good_frames == 0) continue;
         }
 
-        /* 4) 整包 CRC 校验 */
+        /* 4) 整包 CRC 校验：通过后直接在本轮搬移并跳转（不再软复位）
+           原因：之前 VERIFIED OK 后调用 NVIC_SystemReset()，MCU 软复位瞬间所有
+           GPIO 变浮空，W25Q 的 CS 若没有外部上拉会被毛刺误触发，可能破坏刚写
+           好的固件，表现就是"升级模式校验通过、软复位后搬移却 CRC 不符"。
+           改成校验通过后立刻 copy_to_app + jump，W25Q 状态连续，CRC 必然一致。
+           兜底：若此处写了 PENDING 后意外断电，下次上电走 ota_boot 的 PENDING
+           分支照样能搬（上电时 W25Q 自身也复位，不存在软复位毛刺）。 */
         if (verify_w25q(size, crc))
         {
-            ota_param_t p = { OTA_MAGIC, OTA_STATE_PENDING, size, crc };
-            param_write(&p);                      /* 记下"待升级"，等复位后搬移 */
-            uart_puts("\r\n[BOOT] VERIFIED OK, reboot to flash\r\n");
-            HAL_Delay(200);
-            NVIC_SystemReset();                   /* 软复位，重新进 Boot 触发搬移 */
+            ota_param_t p = { OTA_MAGIC, OTA_STATE_PENDING, size, crc, 0 };
+            param_write(&p);                      /* 先记 PENDING（断电兜底用） */
+            uart_puts("\r\n[BOOT] VERIFIED OK, copying to APP...\r\n");
+            if (copy_to_app(p.size, p.crc) == 0)
+            {
+                p.state = OTA_STATE_VALID;        /* 落地成功，等 APP 自确认 */
+                p.try_count = 0;
+                param_write(&p);
+                uart_puts("[BOOT] copy done, jump to APP\r\n");
+                jump_to_app();                    /* 七步跳转，永不返回 */
+            }
+            else
+            {
+                uart_puts("[BOOT] copy failed, resend START to retry\r\n");
+                continue;                         /* 搬移失败也回到等 START */
+            }
         }
         else
         {
@@ -275,38 +286,74 @@ static void enter_upgrade(void)
 /* ============ 升级主入口 ============ */
 void ota_boot(void)
 {
-    /* ① 上电先看参数区：有 PENDING 就搬固件进 APP 区 */
     ota_param_t p;
     param_read(&p);
+
+    /* ① 有 PENDING（刚收完固件，软复位后进这里）：把 W25Q 固件搬到 APP 区 */
     if (p.magic == OTA_MAGIC && p.state == OTA_STATE_PENDING)
     {
         printf("[BOOT] pending firmware found, size=%lu\r\n", (unsigned long)p.size);
         if (copy_to_app(p.size, p.crc) == 0)
         {
-            p.state = OTA_STATE_CONFIRMED;    /* 标记已落地，下次正常跳 APP */
+            p.state = OTA_STATE_VALID;   /* 落地成功，等 APP 自确认 */
+            p.try_count = 0;
             param_write(&p);
             jump_to_app();
         }
         else
         {
-            uart_puts("[BOOT] copy failed, stay in boot\r\n");
+            uart_puts("[BOOT] copy failed, enter upgrade\r\n");
+            enter_upgrade();
         }
+        return;   /* jump_to_app / enter_upgrade 都不会返回 */
     }
 
-    /* ② 2 秒窗口：收到任意字符 -> 升级模式；否则直接跳 APP */
-    uart_puts("[BOOT] press any key in 2s to upgrade, else run APP\r\n");
-    uint8_t k;
-    if (uart_getc(&k, 2000))
+    /* ② 已有落地固件（VALID 或 APP_OK）：决定跳还是停 */
+    if (p.magic == OTA_MAGIC && (p.state == OTA_STATE_VALID || p.state == OTA_STATE_APP_OK))
     {
-        enter_upgrade();
+        if (p.state == OTA_STATE_VALID)
+        {
+            p.try_count++;
+            if (p.try_count >= OTA_MAX_TRY)
+            {
+                /* APP 连续起不来 3 次 -> 停 Boot，进升级模式等重刷（失败保护） */
+                param_write(&p);   /* 记下计数，便于诊断 */
+                printf("[BOOT] APP failed %lu times, enter upgrade for reflash\r\n",
+                       (unsigned long)p.try_count);
+                enter_upgrade();
+                return;
+            }
+            param_write(&p);       /* 累加计数后写回 */
+            printf("[BOOT] try %lu/%lu -> jump to APP\r\n",
+                   (unsigned long)p.try_count, (unsigned long)OTA_MAX_TRY);
+        }
+        else
+        {
+            printf("[BOOT] APP confirmed OK, jump to APP\r\n");
+        }
+
+        /* 开 2 秒窗口：让用户有机会主动升级，否则跳 APP */
+        uart_puts("[BOOT] press any key in 2s to upgrade, else run APP\r\n");
+        uint8_t k;
+        if (uart_getc(&k, 2000))
+        {
+            enter_upgrade();
+        }
+        else
+        {
+            jump_to_app();
+        }
+        return;
     }
-    else if (app_valid())
+
+    /* ③ 没有合法固件（magic 错 / state=NONE）：能跳就跳，否则等升级 */
+    if (app_valid())
     {
         jump_to_app();
     }
     else
     {
-        uart_puts("[BOOT] no APP, enter upgrade\r\n");
+        uart_puts("[BOOT] no valid firmware, enter upgrade\r\n");
         enter_upgrade();
     }
 }
