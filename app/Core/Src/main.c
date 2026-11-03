@@ -19,6 +19,7 @@
 #include <string.h>
 #include "ota_param.h"   /* 参数区结构（与 Boot 共用）：APP 自确认要回写 state/try_count */
 #include "flash_if.h"    /* 内部 Flash 擦写：把“APP 已存活”写回参数区 */
+#include "can.h"         /* bxCAN 驱动：上电跑一次自环自检 */
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -67,6 +68,24 @@ int main(void)
   HAL_Delay(100);                                /* 等串口电平稳定 */
   printf("[APP] running! jump from Boot OK\r\n");
   printf("[APP] VTOR = 0x%08lX\r\n", (unsigned long)SCB->VTOR);
+
+  /* ---------- CAN 上电自检（失败不影响 APP 运行，只打日志） ----------
+     自环模式：CAN 控制器内部把发送接回接收，单板即可验证驱动与分帧。
+     结果对照：
+       T1/T2 pass            -> 控制器初始化、位时序、过滤器、6B 分帧重组均正常
+       FAIL at step 20       -> 收发器/接线通路不通（硬件侧问题，与软件无关）
+       其余编号              -> 1=初始化失败 2~4=单帧收发 5~8=分帧重组 */
+  {
+      int can_ret = can_selftest();
+      if (can_ret == 0)
+      {
+          printf("[APP] CAN self-test PASS (MCU + transceiver path OK)\r\n");
+      }
+      else
+      {
+          printf("[APP] CAN self-test FAIL at step %d\r\n", can_ret);
+      }
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */

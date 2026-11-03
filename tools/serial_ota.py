@@ -18,9 +18,40 @@
 v4：帧级自动重传（最多 10 次/帧），根治串口偶发丢字节导致的整包失败。
 """
 import sys, struct, zlib, time, serial
+from serial.tools import list_ports
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else "COM3"
+def auto_port():
+    """自动找 CH340（USB 转串口，VID=1A86）。插拔 USB 后端口号会漂移，靠这个省事。"""
+    cands = []
+    for p in list_ports.comports():
+        desc = (p.description or "").upper()
+        if (p.vid == 0x1A86) or ("CH340" in desc) or ("USB-SERIAL" in desc):
+            cands.append(p.device)
+    if len(cands) == 1:
+        return cands[0]
+    return None
+
+PORT = sys.argv[1] if len(sys.argv) > 1 else "auto"
 BIN  = sys.argv[2] if len(sys.argv) > 2 else "app.bin"
+
+# 方便用法：只给一个 .bin 文件时，端口自动识别
+if PORT.lower().endswith(".bin"):
+    BIN, PORT = PORT, "auto"
+
+if PORT.upper() == "AUTO":
+    _p = auto_port()
+    if _p is None:
+        print("自动识别 CH340 失败。当前可用串口：")
+        _all = list(list_ports.comports())
+        if not _all:
+            print("   (无)  —— 请检查 CH340 的 USB 是否插好")
+        for _c in _all:
+            print("   %-6s %s" % (_c.device, _c.description))
+        print("用法: python serial_ota.py COM14 app.bin")
+        sys.exit(1)
+    PORT = _p
+    print("自动识别到串口: %s" % PORT)
+
 BAUD = 115200
 CHUNK = 128
 MAX_RETRY = 3        # 整包尝试次数

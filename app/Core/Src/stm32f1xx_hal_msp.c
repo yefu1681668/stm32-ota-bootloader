@@ -153,6 +153,36 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef* hspi)
 }
 
 /**
+  * @brief CAN MSP Initialization
+  * @param hcan: CAN handle pointer
+  * @retval None
+  */
+void HAL_CAN_MspInit(CAN_HandleTypeDef* hcan)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(hcan->Instance==CAN1)
+  {
+    /* ① 开时钟：CAN1 挂在 APB1 上，GPIO 在 GPIOA */
+    __HAL_RCC_CAN1_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+
+    /**CAN1 GPIO Configuration
+    PA11 ------> CAN1_RX   （接收：进 MCU，配置成浮空输入）
+    PA12 ------> CAN1_TX   （发送：出 MCU，配置成复用推挽）
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_11;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;        /* RX 是输入方向 */
+    GPIO_InitStruct.Pull = GPIO_NOPULL;            /* 外部收发器会驱动这根线 */
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_12;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;        /* TX 交给 CAN 外设驱动 */
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;  /* 500kbps 边沿较陡，用高速档 */
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  }
+}
+
+/**
   * @brief UART MSP Initialization
   * This function configures the hardware resources used in this example
   * @param huart: UART handle pointer

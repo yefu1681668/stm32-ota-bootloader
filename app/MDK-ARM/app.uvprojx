@@ -401,6 +401,11 @@
               <FilePath>../Core/Src/flash_if.c</FilePath>
             </File>
             <File>
+              <FileName>can.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Core/Src/can.c</FilePath>
+            </File>
+            <File>
               <FileName>stm32f1xx_it.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f1xx_it.c</FilePath>
@@ -479,6 +484,11 @@
               <FileName>stm32f1xx_hal_uart.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_uart.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f1xx_hal_can.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_can.c</FilePath>
             </File>
           </Files>
         </Group>
