@@ -101,7 +101,9 @@ W25Q ID = EF4014
 - [x] 阶段一：串口 IAP + W25Q 暂存 + 双分区跳转（已真机跑通）
 - [x] boot_try 失败保护：APP 连续 3 次未确认则停在 Boot 等重升（已实测）
 - [x] 压力测试：5 轮连续串口升级 + 升级中途断电验证（不变砖）
-- [ ] 阶段二：CAN 双板互通（SN65HVD230，500kbps，传输抽象层替换）
+- [x] 阶段二：CAN 驱动与双板互通 —— **已独立成项目** [can-diagnostic-terminal](https://github.com/yefu1681668/can-diagnostic-terminal)：
+  500kbps 位时序、ISO-TP 拆包、UDS 六服务、W25Q 黑匣子，两块 C8T6 双板 NORMAL 互通已真机验证（ACK 正常 / 无丢帧 / 跨板诊断应答）
+- [ ] 阶段二（续）：把 OTA 的传输通道从串口切到 CAN —— 需先抽出 `transport_t` 函数指针接口（**当前 Boot 内是串口直连，尚无抽象层**），再替换实现
 - [ ] 阶段三：LoRa 远程升级（E22-470T22S，470MHz UART 透传）
 
 ## 已知现象
